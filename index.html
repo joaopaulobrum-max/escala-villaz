@@ -78,7 +78,7 @@ section .in { padding-block: 32px; }
 .dia .dm { font-size: 13px; font-weight: 700; text-transform: uppercase; margin-top: 6px; }
 .dia .hj { font-size: 10px; letter-spacing: .2em; text-transform: uppercase; color: var(--laranja); font-weight: 700; margin-top: 4px; }
 
-/* modo "turnos": dois corretores por plantão (10h e 14h), com espaço para o nome */
+/* modo "turnos": um corretor por horário do plantão (10h e 14h; na Costa Sul 10h, 13h e 16h), com espaço para o nome */
 .nota { font-size: 14px; line-height: 1.45; color: var(--azul-bruma); margin: -4px 0 14px; max-width: 68ch; }
 .tn { display: block; margin-top: 8px; min-width: 0; }
 .tn .hr { display: block; font-size: 11px; font-weight: 700; letter-spacing: .08em; line-height: 1; }
@@ -137,6 +137,7 @@ textarea { width: 100%; max-width: 100%; margin-top: 10px; min-height: 180px; fo
   .turnos .cel .tn .nm { flex: 1 1 auto; margin-top: 0; }
   .turnos .cel .t0 { grid-row: 1; }
   .turnos .cel .t1 { grid-row: 2; }
+  .turnos .cel .t2 { grid-row: 3; }
 }
 @media (max-width: 720px) {
   .semana, .turnos .semana { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -176,6 +177,148 @@ textarea { width: 100%; max-width: 100%; margin-top: 10px; min-height: 180px; fo
 <div class="frase"><div class="in">
   <p>Ponto de apoio do corretor, na avenida em frente ao condomínio. Todo atendimento começa por aqui.</p>
 </div></div>
+
+<!-- Cadastro de cliente atendido: entra igual nas 3 escalas e na escala geral (gerar-escalas.ps1 põe este arquivo em cada página).
+     Só aparece nas páginas ligadas à planilha (com API). O programa da planilha registra no Google Forms do João e copia o gestor da imobiliária; a página nunca lê clientes de volta. -->
+<style>
+.cad[hidden] { display: none; }
+.cad .cad-nota { font-size: 14px; line-height: 1.45; color: var(--azul-bruma); margin: -4px 0 14px; max-width: 68ch; }
+.cad form { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px 20px; background: var(--creme); color: var(--petroleo-profundo); border-top: 10px solid var(--laranja); padding: 20px 22px 22px; }
+.cad label { display: block; min-width: 0; font-size: 13px; font-weight: 700; line-height: 1.3; }
+.cad label small { font-size: 13px; font-weight: 400; }
+.cad .largo { grid-column: 1 / -1; }
+.cad input, .cad select { display: block; width: 100%; min-width: 0; height: 46px; margin-top: 5px; padding: 0 10px; font: 400 16px/1.2 var(--campanha); color: var(--petroleo-profundo); background: var(--branco); border: 1.5px solid rgba(44,65,67,.5); border-radius: 0; }
+.cad input:focus-visible, .cad select:focus-visible { outline: 2px solid var(--laranja); outline-offset: 1px; }
+.cad select:disabled { opacity: .6; }
+.cad .cad-pote { position: absolute; left: -9999px; width: 1px; height: 1px; overflow: hidden; }
+.cad .cad-fim { grid-column: 1 / -1; display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; }
+.cad button:disabled { opacity: .6; cursor: default; }
+.cad .cad-msg { min-width: 0; flex: 1 1 220px; font-size: 15px; font-weight: 600; line-height: 1.3; }
+.cad .cad-msg.ruim { color: #a33b12; }
+@media (max-width: 720px) {
+  .cad form { grid-template-columns: minmax(0, 1fr); padding: 16px 16px 18px; }
+  .cad button { width: 100%; }
+}
+@media print { .cad { display: none; } }
+</style>
+
+<section class="cad" id="cad" hidden><div class="in">
+  <div class="sec-t">Cadastro de cliente atendido</div>
+  <p class="cad-nota">Para corretores e recepcionistas: preencha logo depois do atendimento.</p>
+  <form id="cad-form" novalidate autocomplete="off">
+    <label class="largo">Nome completo
+      <input id="cad-nome" type="text" maxlength="80" autocomplete="off" autocapitalize="words" spellcheck="false">
+    </label>
+    <label>Celular com DDD
+      <input id="cad-celular" type="tel" inputmode="tel" maxlength="25" autocomplete="off">
+    </label>
+    <label>E-mail <small>(se o cliente não quiser passar, deixe em branco)</small>
+      <input id="cad-email" type="email" inputmode="email" maxlength="120" autocomplete="off" autocapitalize="none" spellcheck="false">
+    </label>
+    <label>Imobiliária
+      <select id="cad-imo" disabled><option value="">Carregando…</option></select>
+    </label>
+    <label>Corretor
+      <select id="cad-corretor" disabled><option value="">Carregando…</option></select>
+    </label>
+    <div class="cad-pote" aria-hidden="true"><input id="cad-site" type="text" tabindex="-1" autocomplete="off"></div>
+    <div class="cad-fim">
+      <button type="submit" id="cad-botao">Cadastrar cliente</button>
+      <div class="cad-msg" id="cad-msg" role="status" aria-live="polite"></div>
+    </div>
+  </form>
+</div></section>
+
+<script>
+(function () {
+  var API = 'https://script.google.com/macros/s/AKfycbxo5IecVyM33m4xi9BVN6GxUOz5k_HBLpnus2c18lLIu8V9q1Tg4h_FT5fj7wlwTJoV7g/exec', ORIGEM = 'villaz';
+  var caixa = document.getElementById('cad');
+  if (!API || !caixa) return;   // versão sem planilha: o cadastro não aparece
+  var $ = function (id) { return document.getElementById(id); };
+  var form = $('cad-form'), nome = $('cad-nome'), cel = $('cad-celular'), mail = $('cad-email');
+  var sImo = $('cad-imo'), sCor = $('cad-corretor'), botao = $('cad-botao'), msg = $('cad-msg');
+  var listas = null, enviando = false, idEnvio = null, inicial = true;
+
+  function aviso(t, ruim) { msg.textContent = t || ''; msg.className = 'cad-msg' + (ruim ? ' ruim' : ''); }
+  function opcoes(sel, vazio, itens, atual) {
+    sel.textContent = '';
+    var o = document.createElement('option'); o.value = ''; o.textContent = vazio; sel.appendChild(o);
+    itens.forEach(function (it) {
+      var op = document.createElement('option'); op.value = it.v; op.textContent = it.t; sel.appendChild(op);
+    });
+    sel.value = atual;
+    if (sel.value !== atual) sel.value = '';
+  }
+  function pintaCorretores() {
+    var imo = listas && listas[sImo.value];
+    if (!imo) { opcoes(sCor, 'Escolha a imobiliária primeiro', [], ''); sCor.disabled = true; return; }
+    var itens = imo.corretores.map(function (c) { return { v: c, t: c }; });
+    opcoes(sCor, itens.length ? 'Escolha o corretor' : 'Nenhum corretor na escala', itens, sCor.value);
+    sCor.disabled = !itens.length;
+  }
+  function carrega() {
+    return fetch(API + (API.indexOf('?') < 0 ? '?' : '&') + 'acao=geral').then(function (r) { return r.json(); }).then(function (d) {
+      if (!d || !d.ok || !d.imos) throw new Error('resposta');
+      // O programa diz se o cadastro já está ativo; enquanto não estiver, a página mostra só a escala.
+      caixa.hidden = d.cadastro === false;
+      listas = d.imos;
+      var itens = Object.keys(listas).map(function (k) { return { v: k, t: listas[k].nome }; });
+      // Na escala de uma imobiliária ela já vem escolhida (dá para trocar). Na escala geral, a pessoa escolhe.
+      var atual = inicial && listas[ORIGEM] ? ORIGEM : sImo.value;
+      inicial = false;
+      opcoes(sImo, 'Escolha a imobiliária', itens, atual);
+      sImo.disabled = false;
+      pintaCorretores();
+      if (msg.className.indexOf('ruim') >= 0 && msg.getAttribute('data-lista')) { aviso(''); msg.removeAttribute('data-lista'); }
+    }).catch(function () {
+      if (listas) return;
+      aviso('Não consegui carregar a lista de corretores. Recarregue a página.', true);
+      msg.setAttribute('data-lista', '1');
+    });
+  }
+  function novoId() { return Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 10); }
+  function erro(campo, t) { aviso(t, true); campo.focus(); return false; }
+  function confere() {
+    if (nome.value.replace(/\s+/g, ' ').trim().split(' ').length < 2) return erro(nome, 'Escreva o nome completo.');
+    var dig = cel.value.replace(/\D/g, '').length;
+    if (dig < 10 || dig > 15) return erro(cel, 'Confira o celular, com DDD.');
+    var m = mail.value.trim();
+    if (m && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(m)) return erro(mail, 'Confira o e-mail ou deixe em branco.');
+    if (!sImo.value) return erro(sImo, 'Escolha a imobiliária.');
+    if (!sCor.value) return erro(sCor, 'Escolha o corretor.');
+    return true;
+  }
+
+  sImo.addEventListener('change', function () { sCor.value = ''; pintaCorretores(); });
+  // Mudou algum dado depois de uma falha: é um envio novo, com identificação nova.
+  form.addEventListener('input', function () { idEnvio = null; });
+  form.addEventListener('change', function () { idEnvio = null; });
+  form.addEventListener('submit', function (e) {
+    e.preventDefault();
+    if (enviando || !listas || !confere()) return;
+    enviando = true;
+    botao.disabled = true;
+    aviso('Enviando…');
+    if (!idEnvio) idEnvio = novoId();
+    // corpo em texto simples: o navegador não faz a checagem prévia que o Google não responde
+    fetch(API, { method: 'POST', body: JSON.stringify({
+      acao: 'cliente', id: idEnvio, nome: nome.value, celular: cel.value, email: mail.value,
+      imo: sImo.value, corretor: sCor.value, origem: ORIGEM, site: $('cad-site').value
+    }) }).then(function (r) { return r.json(); }).then(function (d) {
+      if (!d || !d.ok) { aviso((d && d.erro) || 'Não salvou. Tente de novo.', true); return; }
+      nome.value = ''; cel.value = ''; mail.value = ''; sCor.value = ''; idEnvio = null;
+      if (d.copia === false) aviso('Cliente cadastrado, mas a cópia para o gestor não saiu. Avise o João.', true);
+      else aviso('Cliente cadastrado.');
+    }).catch(function () {
+      aviso('Não salvou. Confira a internet e toque de novo: o que você escreveu continua aqui.', true);
+    }).then(function () { enviando = false; botao.disabled = false; });
+  });
+
+  carrega();
+  document.addEventListener('visibilitychange', function () { if (!document.hidden && !enviando) carrega(); });
+})();
+</script>
+
 
 <section class="so-turnos"><div class="in">
   <div class="sec-t">Horários vagos · próximos 30 dias</div>
@@ -253,9 +396,12 @@ textarea { width: 100%; max-width: 100%; margin-top: 10px; min-height: 180px; fo
   function dd(n) { return (n < 10 ? '0' : '') + n; }
   function mesmo(a, b) { return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate(); }
 
-  // Turnos: dois corretores por plantão, com espaço para o nome de cada um.
+  // Turnos: um corretor por horário do plantão, com espaço para o nome de cada um.
+  // HORAS vem do gerar-escalas.ps1 (padrão 10h e 14h; a Costa Sul usa 10h, 13h e 16h).
   var TURNOS = 'topo turnos api'.indexOf('turnos') >= 0;
   var HORAS = ['10h', '14h'];
+  function vazio() { var a = []; for (var i = 0; i < HORAS.length; i++) a.push(''); return a; }
+  function lista(a) { return a.length < 2 ? a.join('') : a.slice(0, -1).join(', ') + ' e ' + a[a.length - 1]; }
   // Nomes fixos, publicados para todo mundo que abre o link: { '2026-11-05': ['Nome das 10h', 'Nome das 14h'] }
   // Vem de nomes-<imobiliária>.json (gerar-escalas.ps1 injeta aqui).
   var NOMES = {};
@@ -364,7 +510,7 @@ textarea { width: 100%; max-width: 100%; margin-top: 10px; min-height: 180px; fo
       var k = iso(d), livres = [];
       for (var i = 0; i < HORAS.length; i++) if (!nome(k, i).trim()) livres.push(i);
       if (!livres.length) continue;
-      var hs = livres.map(function (x) { return HORAS[x]; }).join(' e ');
+      var hs = lista(livres.map(function (x) { return HORAS[x]; }));
       var dia = dd(d.getDate()) + '/' + dd(d.getMonth() + 1);
       h += '<button type="button" class="vg" data-alvo="m-' + k + '-' + livres[0] + '" aria-label="Vago: ' + DSL[d.getDay()] + ' ' + dia + ', ' + hs +
         '. Escrever o nome."><span class="vd">' + dia + '</span><span class="vw">' + DSL[d.getDay()] + '</span><span class="vh">' + hs + '</span></button>';
@@ -400,7 +546,7 @@ textarea { width: 100%; max-width: 100%; margin-top: 10px; min-height: 180px; fo
     var k = el.getAttribute('data-k'), i = +el.getAttribute('data-i');
     var v = (el.textContent || '').replace(/\s+/g, ' ');
     if (!v.trim()) { v = ''; el.innerHTML = ''; }   // campo vazio de verdade, para a dica "nome" voltar
-    if (REMOTO) { if (!REMOTO[k]) REMOTO[k] = ['', '']; REMOTO[k][i] = v; }
+    if (REMOTO) { if (!REMOTO[k]) REMOTO[k] = vazio(); REMOTO[k][i] = v; }
     else { if (!salvos[k]) salvos[k] = []; salvos[k][i] = v; }
     var iguais = document.querySelectorAll('.nm[data-k="' + k + '"][data-i="' + i + '"]');
     for (var q = 0; q < iguais.length; q++) if (iguais[q] !== el) iguais[q].textContent = v;
@@ -423,7 +569,7 @@ textarea { width: 100%; max-width: 100%; margin-top: 10px; min-height: 180px; fo
       for (var a = 0; a < todos.length; a++) {
         var pk = todos[a].getAttribute('data-k'), pi = +todos[a].getAttribute('data-i');
         if (todos[a] === document.activeElement) {   // quem está digitando manda: o que está no campo vale
-          if (!REMOTO[pk]) REMOTO[pk] = ['', ''];
+          if (!REMOTO[pk]) REMOTO[pk] = vazio();
           REMOTO[pk][pi] = limpa(todos[a].textContent);
           continue;
         }
@@ -460,7 +606,7 @@ textarea { width: 100%; max-width: 100%; margin-top: 10px; min-height: 180px; fo
       clearTimeout(relogio[ch]);
       var s = servidor[k], la = (s && s[i]) || '';
       if (v === la && !falhas[ch]) return;
-      if (!servidor[k]) servidor[k] = ['', ''];
+      if (!servidor[k]) servidor[k] = vazio();
       servidor[k][i] = v; falhas[ch] = false;
       envia(k, i, v);
     };
